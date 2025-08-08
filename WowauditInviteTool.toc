@@ -1,4 +1,4 @@
-## Interface: 110107
+## Interface: 110200
 ## Interface-Classic: 11502
 ## Interface-Cata: 40400
 
