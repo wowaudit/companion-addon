@@ -6,7 +6,7 @@
 ## Description: Automatically invite and uninvite raid members based on the Wowaudit Raid Planner
 ## Notes: Automatically invite and uninvite raid members based on the Wowaudit Raid Planner
 ## Author: Emiel van Lankveld
-## Version: 0.1.16
+## Version: 0.1.17
 ## X-Embeds: Ace3, LibDataBroker-1.1, LibDBIcon-1.0
 ## OptionalDependencies: Ace3, LibDataBroker-1.1, LibDBIcon-1.0
 ## IconTexture: Interface\AddOns\WowauditInviteTool\Media\logo
