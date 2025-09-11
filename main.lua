@@ -1,4 +1,4 @@
-Wit = LibStub("AceAddon-3.0"):NewAddon("Wowaudit Invite Tool")
+Wit = LibStub("AceAddon-3.0"):NewAddon("Wowaudit Invite Tool", "AceTimer-3.0")
 local addon = Wit
 local AceGUI = LibStub("AceGUI-3.0")
 local inviteString
