@@ -1,4 +1,4 @@
-## Interface: 110200
+## Interface: 110205
 ## Interface-Classic: 11502
 ## Interface-Cata: 40400
 
@@ -6,7 +6,7 @@
 ## Description: Automatically invite and uninvite raid members based on the Wowaudit Raid Planner
 ## Notes: Automatically invite and uninvite raid members based on the Wowaudit Raid Planner
 ## Author: Emiel van Lankveld
-## Version: 0.1.18
+## Version: 0.1.19
 ## X-Embeds: Ace3
 ## OptionalDependencies: Ace3
 ## IconTexture: Interface\AddOns\WowauditInviteTool\Media\logo
