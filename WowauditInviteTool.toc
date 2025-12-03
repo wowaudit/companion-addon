@@ -1,0 +1,23 @@
+## Interface: 110205
+## Interface-Classic: 11502
+## Interface-Cata: 40400
+
+## Title: Wowaudit Invite Tool
+## Description: Automatically invite and uninvite raid members based on the Wowaudit Raid Planner
+## Notes: Automatically invite and uninvite raid members based on the Wowaudit Raid Planner
+## Author: Emiel van Lankveld
+## Version: 0.1.19
+## X-Embeds: Ace3
+## OptionalDependencies: Ace3
+## IconTexture: Interface\AddOns\WowauditInviteTool\Media\logo
+
+## LoadManagers: AddonLoader
+## X-LoadOn-Always: delayed
+## X-LoadOn-Slash: /wit
+
+## X-Curse-Project-ID: 384840
+## X-Wago-ID: vNAevpNo
+
+embeds.xml
+
+main.lua
