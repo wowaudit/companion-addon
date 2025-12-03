@@ -1,0 +1,26 @@
+## Interface: 110207
+## Interface-Classic: 11502
+## Interface-Cata: 40400
+
+## Title: Wowaudit Companion
+## Description: Sync game data to your wowaudit guild, and use /wit to manage raid invites
+## Notes: Sync game data to your wowaudit guild, and use /wit to manage raid invites
+## Author: Emiel van Lankveld
+## Version: 1.0.0
+## X-Embeds: Ace3
+## OptionalDependencies: Ace3
+## IconTexture: Interface\AddOns\WowauditCompanion\Media\logo
+
+## LoadManagers: AddonLoader
+## X-LoadOn-Always: delayed
+## X-LoadOn-Slash: /wit
+
+## X-Curse-Project-ID: 384840
+## X-Wago-ID: vNAevpNo
+
+## SavedVariables: WowauditNeighborhoodSyncDB
+
+embeds.xml
+
+Modules\inviteTool.lua
+Modules\neighborhoodSync.lua
