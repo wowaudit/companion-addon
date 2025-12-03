@@ -10,7 +10,7 @@ end
 
 local function IsGuildNeighborhood()
   local metadata = C_HousingNeighborhood.GetCornerstoneNeighborhoodInfo()
-  return metadata and metadata.neighborhoodOwnerType == 0 -- should be 1
+  return metadata and metadata.neighborhoodOwnerType == 1
 end
 
 local function GetGuildProfileName()
