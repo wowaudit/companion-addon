@@ -6,7 +6,7 @@
 ## Description: Syncs game data to your wowaudit guild. Use "/wit" or "/wowaudit invite" to manage raid invites
 ## Notes: Syncs game data to your wowaudit guild. Use "/wit" or "/wowaudit invite" to manage raid invites
 ## Author: Emiel van Lankveld
-## Version: 1.0.1
+## Version: 1.0.2
 ## X-Embeds: Ace3
 ## OptionalDependencies: Ace3
 ## IconTexture: Interface\AddOns\WowauditCompanion\Media\logo
