@@ -30,6 +30,7 @@ local defaults = {
       plots = nil,
       metadata = nil,
       currentRealm = nil,
+      mapId = nil,
     },
     guild = {
       motd = nil,
@@ -145,6 +146,7 @@ function DataSync:ManualSync()
   self:OnInfoUpdated()
 
   self.db.profile.neighborhood.currentRealm = GetRealmName()
+  self.db.profile.neighborhood.mapId = C_Map.GetBestMapForUnit("player")
 
   -- Sync guild MOTD immediately
   self:SyncGuildMOTD()
@@ -160,6 +162,7 @@ function DataSync:OnZoneChanged(event)
     self:OnInfoUpdated()
 
     self.db.profile.neighborhood.currentRealm = GetRealmName()
+    self.db.profile.neighborhood.mapId = C_Map.GetBestMapForUnit("player")
 
     -- Sync guild MOTD with 10 second delay to ensure data is available
     self:ScheduleTimer("SyncGuildMOTD", 10)
