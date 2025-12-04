@@ -126,7 +126,8 @@ function DataSync:SetGuildProfile()
 end
 
 function DataSync:ManualSync()
-  print("Syncing neighborhood data to wowaudit...")
+  C_HousingNeighborhood.RequestNeighborhoodRoster()
+  C_HousingNeighborhood.RequestNeighborhoodInfo()
 
   -- Check requirements
   if not HasNeighborhoodBuff() then
@@ -150,9 +151,14 @@ function DataSync:ManualSync()
 
   -- Sync guild MOTD immediately
   self:SyncGuildMOTD()
+
+  print("Synced neighborhood data. Close the game or /reload to send it to the wowaudit website.")
 end
 
 function DataSync:OnZoneChanged(event)
+  C_HousingNeighborhood.RequestNeighborhoodRoster()
+  C_HousingNeighborhood.RequestNeighborhoodInfo()
+
   -- Only sync neighborhood data when we have the neighborhood buff and it's a guild neighborhood
   if HasNeighborhoodBuff() and IsGuildNeighborhood() then
     -- Set profile based on guild before syncing
