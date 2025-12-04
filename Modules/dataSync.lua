@@ -34,6 +34,8 @@ local defaults = {
     },
     guild = {
       motd = nil,
+      ranks = nil,
+      members = nil,
     },
   },
 }
@@ -110,6 +112,41 @@ function DataSync:SyncGuildMOTD()
   end
 end
 
+function DataSync:SyncGuildRanks()
+  self:SetGuildProfile()
+  local numRanks = GuildControlGetNumRanks()
+  if numRanks and numRanks > 0 then
+    local ranks = {}
+    for i = 1, numRanks do
+      ranks[i] = {
+        index = i,
+        name = GuildControlGetRankName(i),
+      }
+    end
+    self.db.profile.guild.ranks = ranks
+  end
+end
+
+function DataSync:SyncGuildMembers()
+  self:SetGuildProfile()
+  local numMembers = GetNumGuildMembers()
+  if numMembers and numMembers > 0 then
+    local members = {}
+    for i = 1, numMembers do
+      local name, _, _, _, _, _, publicNote = GetGuildRosterInfo(i)
+      if name then
+        members[i] = {
+          name = name,
+          publicNote = publicNote,
+          officerNote = officerNote,
+          guid = guid,
+        }
+      end
+    end
+    self.db.profile.guild.members = members
+  end
+end
+
 function DataSync:OnGuildMOTD(event, motd)
   -- motd is passed as the second argument to the event handler
   if motd and motd ~= "" then
@@ -128,29 +165,30 @@ end
 function DataSync:ManualSync()
   C_HousingNeighborhood.RequestNeighborhoodRoster()
   C_HousingNeighborhood.RequestNeighborhoodInfo()
+  C_GuildInfo.GuildRoster() -- Request fresh guild roster data
+
+  -- Sync guild data immediately
+  self:SyncGuildMOTD()
+  self:SyncGuildRanks()
+  self:SyncGuildMembers()
+  print("Synced guild data. Close the game or /reload to send it to the wowaudit website.")
 
   -- Check requirements
   if not HasNeighborhoodBuff() then
-    print("You are not in your own neighborhood")
+    print("You are not in your own neighborhood, did not sync neighborhood data")
     return
   end
 
   if not IsGuildNeighborhood() then
-    print("Your neighborhood is not owned by your guild")
+    print("Your neighborhood is not owned by your guild, did not sync neighborhood data")
     return
   end
-
-  -- Set profile based on guild before syncing
-  self:SetGuildProfile()
 
   self:OnMapDataUpdated()
   self:OnInfoUpdated()
 
   self.db.profile.neighborhood.currentRealm = GetRealmName()
   self.db.profile.neighborhood.mapId = C_Map.GetBestMapForUnit("player")
-
-  -- Sync guild MOTD immediately
-  self:SyncGuildMOTD()
 
   print("Synced neighborhood data. Close the game or /reload to send it to the wowaudit website.")
 end
@@ -170,7 +208,9 @@ function DataSync:OnZoneChanged(event)
     self.db.profile.neighborhood.currentRealm = GetRealmName()
     self.db.profile.neighborhood.mapId = C_Map.GetBestMapForUnit("player")
 
-    -- Sync guild MOTD with 10 second delay to ensure data is available
+    -- Sync guild data with 10 second delay to ensure data is available
     self:ScheduleTimer("SyncGuildMOTD", 10)
+    self:ScheduleTimer("SyncGuildRanks", 11)
+    self:ScheduleTimer("SyncGuildMembers", 12)
   end
 end
