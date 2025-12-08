@@ -8,12 +8,6 @@ local notInSetup
 local frame
 local frameShown
 
-SLASH_WOWAUDITINVITETOOL1 = '/wit'
-
-function SlashCmdList.WOWAUDITINVITETOOL(msg, editBox)
-  addon:CreateFrame()
-end
-
 function addon:CreateFrame()
   if frameShown then
     return
