@@ -1,21 +1,33 @@
 function DataSync:RegisterGuildSyncEvents()
-  self:RegisterEvent("GUILD_MOTD", "SyncGuildData")
+  self:RegisterEvent("GUILD_MOTD", "OnGuildMOTD")
 end
 
 function DataSync:ScheduleGuildDataSync()
   self:ScheduleTimer("SyncGuildData", 10)
 end
 
+function DataSync:OnGuildMOTD(_, motd)
+  self.latestGuildMOTD = motd
+  self:SyncGuildData()
+end
+
 function DataSync:SyncGuildData()
   self:SetGuildProfile()
-  self:SyncGuildMOTD(guildProfile)
-  self:SyncGuildRanks(guildProfile)
-  self:SyncGuildMembers(guildProfile)
+  self:SyncGuildMOTD()
+  self:SyncGuildRanks()
+  self:SyncGuildMembers()
   self.db.profile.lastSyncTime = C_DateAndTime.GetServerTimeLocal()
 end
 
 function DataSync:SyncGuildMOTD()
-  local motd = GetGuildRosterMOTD()
+  local motd = self.latestGuildMOTD
+  if motd == nil then
+    local ok, value = pcall(GetGuildRosterMOTD)
+    if ok then
+      motd = value
+    end
+  end
+
   if motd and motd ~= "" then
     self.db.profile.guild.motd = motd
   else
