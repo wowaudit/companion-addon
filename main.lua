@@ -19,6 +19,14 @@ local function HandleSync()
     end
 end
 
+local function HandleExportSetup()
+    if RaidExport and RaidExport.ShowExportPopup then
+        RaidExport:ShowExportPopup()
+    else
+        print("[Wowaudit Companion] RaidExport module not available")
+    end
+end
+
 local function HandleWowauditCommand(msg)
     msg = (msg or ""):trim():lower()
 
@@ -28,8 +36,11 @@ local function HandleWowauditCommand(msg)
     elseif msg == "invite" then
         HandleInvite()
 
+    elseif msg == "export-setup" then
+        HandleExportSetup()
+
     else
-        print("Usage: /wowaudit [sync|invite]")
+        print("Usage: /wowaudit [sync|invite|export-setup]")
     end
 end
 

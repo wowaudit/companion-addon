@@ -23,6 +23,7 @@
 embeds.xml
 
 Modules\inviteTool.lua
+Modules\raidExport.lua
 
 Modules\dataSync.lua
 Modules\sync\guildData.lua
