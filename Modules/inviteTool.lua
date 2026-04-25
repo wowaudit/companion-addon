@@ -1,15 +1,24 @@
 Wit = LibStub("AceAddon-3.0"):NewAddon("Wowaudit Invite Tool", "AceTimer-3.0")
 local addon = Wit
 local AceGUI = LibStub("AceGUI-3.0")
+local ScrollingTable = LibStub("ScrollingTable")
 local invitingPreview
 local uninvitingPreview
 local notInSetup
 local frame
 local frameShown
 local editbox
-local encounterRowsContainer
+local strategyButton
+local encounterTable
+local encounterTableHost
 local rawInputText
 local encounters
+local inviteStrategies = {
+  { key = "invite_only", label = "Invite only" },
+  { key = "replace", label = "Invite and remove" },
+  { key = "rearrange", label = "Invite and rearrange" },
+}
+local selectedStrategyIndex = 1
 
 local function trim(text)
   if not text then
@@ -30,6 +39,25 @@ function addon:NormalizeInviteList(invitelistText)
   return cleanedText:gsub(" ", "\n")
 end
 
+function addon:GetInviteCount(inviteString)
+  local count = 0
+
+  for _ in string.gmatch(inviteString or "", "([^\n]+)") do
+    count = count + 1
+  end
+
+  return count
+end
+
+function addon:GetEncounterLabel(encounter)
+  local difficultyInitial = string.sub(encounter.difficulty or "", 1, 1)
+  if difficultyInitial == "" then
+    difficultyInitial = "?"
+  end
+
+  return string.format("%s (%s)", encounter.name or "Unknown Encounter", difficultyInitial)
+end
+
 function addon:ParseEncounterPayload(payloadText)
   local parsedEncounters = {}
   local currentEncounter = nil
@@ -46,6 +74,8 @@ function addon:ParseEncounterPayload(payloadText)
           difficulty = trim(difficulty),
           inviteString = "",
           hasInviteList = false,
+          inviteCount = 0,
+          label = "",
         }
         table.insert(parsedEncounters, currentEncounter)
       else
@@ -53,56 +83,102 @@ function addon:ParseEncounterPayload(payloadText)
         if inviteListText and currentEncounter and not currentEncounter.hasInviteList then
           currentEncounter.inviteString = addon:NormalizeInviteList(inviteListText)
           currentEncounter.hasInviteList = true
+          currentEncounter.inviteCount = addon:GetInviteCount(currentEncounter.inviteString)
+          currentEncounter.label = addon:GetEncounterLabel(currentEncounter)
         end
       end
+    end
+  end
+
+  for _, encounter in ipairs(parsedEncounters) do
+    if encounter.label == "" then
+      encounter.label = addon:GetEncounterLabel(encounter)
     end
   end
 
   return parsedEncounters
 end
 
-function addon:RefreshEncounterRows()
-  if not encounterRowsContainer then
+function addon:RefreshEncounterTable()
+  if not encounterTable then
     return
   end
 
-  encounterRowsContainer:ReleaseChildren()
-
+  local tableData = {}
   for _, encounter in ipairs(encounters or {}) do
-    local row = AceGUI:Create("SimpleGroup")
-    row:SetFullWidth(true)
-    row:SetLayout("Flow")
-
-    local difficultyInitial = string.sub(encounter.difficulty or "", 1, 1)
-    if difficultyInitial == "" then
-      difficultyInitial = "?"
-    end
-
-    local encounterLabel = AceGUI:Create("Label")
-    encounterLabel:SetWidth(130)
-    encounterLabel:SetText(string.format("%s (%s)", encounter.name or "Unknown Encounter", difficultyInitial))
-    row:AddChild(encounterLabel)
-
-    local replaceButton = AceGUI:Create("Button")
-    replaceButton:SetText("Invite and remove")
-    replaceButton:SetWidth(100)
-    replaceButton:SetCallback("OnClick", function() addon:Replace(false, encounter.inviteString) end)
-    row:AddChild(replaceButton)
-
-    local rearrangeButton = AceGUI:Create("Button")
-    rearrangeButton:SetText("Invite and rearrange")
-    rearrangeButton:SetWidth(120)
-    rearrangeButton:SetCallback("OnClick", function() addon:InviteAndRearrange(encounter.inviteString) end)
-    row:AddChild(rearrangeButton)
-
-    local inviteButton = AceGUI:Create("Button")
-    inviteButton:SetText("Invite only")
-    inviteButton:SetWidth(85)
-    inviteButton:SetCallback("OnClick", function() addon:InviteOnly(encounter.inviteString) end)
-    row:AddChild(inviteButton)
-
-    encounterRowsContainer:AddChild(row)
+    table.insert(tableData, {
+      encounterName = encounter.label,
+      inviteString = encounter.inviteString,
+      cols = {
+        encounter.label,
+        tostring(encounter.inviteCount),
+        {
+          value = "Invite",
+          color = { r = 0.2, g = 0.8, b = 1.0, a = 1.0 },
+        },
+      },
+    })
   end
+
+  encounterTable:SetData(tableData)
+end
+
+function addon:UpdateStrategyButtonText()
+  if strategyButton then
+    strategyButton:SetText("Mode: " .. inviteStrategies[selectedStrategyIndex].label)
+  end
+end
+
+function addon:CycleStrategy()
+  selectedStrategyIndex = selectedStrategyIndex + 1
+  if selectedStrategyIndex > #inviteStrategies then
+    selectedStrategyIndex = 1
+  end
+
+  addon:UpdateStrategyButtonText()
+end
+
+function addon:RunStrategyForEncounter(inviteString)
+  local strategy = inviteStrategies[selectedStrategyIndex]
+  if strategy.key == "replace" then
+    addon:Replace(false, inviteString)
+  elseif strategy.key == "rearrange" then
+    addon:InviteAndRearrange(inviteString)
+  else
+    addon:InviteOnly(inviteString)
+  end
+end
+
+function addon:CreateEncounterTable()
+  if encounterTable or not encounterTableHost then
+    return
+  end
+
+  local columns = {
+    { name = "Encounter", width = 238 },
+    { name = "Players", width = 56, align = "CENTER" },
+    { name = "Action", width = 90, align = "CENTER" },
+  }
+
+  encounterTable = ScrollingTable:CreateST(columns, 10, 18, nil, encounterTableHost.frame)
+  encounterTable.frame:SetPoint("TOPLEFT", encounterTableHost.frame, "TOPLEFT", 0, -4)
+  encounterTable.frame:SetPoint("BOTTOMRIGHT", encounterTableHost.frame, "BOTTOMRIGHT", 0, 0)
+  encounterTable:RegisterEvents({
+    ["OnClick"] = function(_, _, data, _, row, realrow, column, _, button)
+      if row and realrow and column == 3 and button == "LeftButton" then
+        local rowData = data[realrow]
+        if rowData then
+          addon:RunStrategyForEncounter(rowData.inviteString)
+        end
+
+        return true
+      end
+
+      return false
+    end,
+  }, true)
+  encounterTable:EnableSelection(false)
+  encounterTable:SetData({})
 end
 
 function addon:ResetInput()
@@ -113,7 +189,7 @@ function addon:ResetInput()
     editbox:SetText("")
   end
 
-  addon:RefreshEncounterRows()
+  addon:RefreshEncounterTable()
 
   if frame then
     frame:SetStatusText("")
@@ -127,7 +203,7 @@ function addon:CreateFrame()
     frame = AceGUI:Create("Frame")
     frame:SetTitle("Wowaudit Invite Tool")
     frame:SetLayout("List")
-    frame:SetWidth(455)
+    frame:SetWidth(430)
     frame:SetHeight(400)
     frame:EnableResize(false)
     frame.frame:SetFrameStrata("MEDIUM")
@@ -141,17 +217,17 @@ function addon:CreateFrame()
     horizontalGroup:SetLayout("Flow")
 
     local editBoxGroup = AceGUI:Create("SimpleGroup")
-    editBoxGroup:SetWidth(270)
+    editBoxGroup:SetWidth(250)
     editBoxGroup:SetLayout("Fill")
 
     editbox = AceGUI:Create("MultiLineEditBox")
     editbox:SetLabel("Paste invite string here:")
     editbox:SetFullWidth(true)
-    editbox:SetNumLines(8)
+    editbox:SetNumLines(7)
     editbox:SetCallback("OnTextChanged", function(_, _, text)
       rawInputText = text or ""
       encounters = addon:ParseEncounterPayload(rawInputText)
-      addon:RefreshEncounterRows()
+      addon:RefreshEncounterTable()
 
       if frame then
         frame:SetStatusText(string.format("Parsed %d encounter(s)", #encounters))
@@ -165,6 +241,11 @@ function addon:CreateFrame()
     buttonGroup:SetWidth(160)
     buttonGroup:SetLayout("List")
 
+    strategyButton = AceGUI:Create("Button")
+    strategyButton:SetWidth(150)
+    strategyButton:SetCallback("OnClick", function() addon:CycleStrategy() end)
+    buttonGroup:AddChild(strategyButton)
+
     local resetButton = AceGUI:Create("Button")
     resetButton:SetText("Reset")
     resetButton:SetWidth(150)
@@ -176,21 +257,27 @@ function addon:CreateFrame()
 
     frame:AddChild(horizontalGroup)
 
-    encounterRowsContainer = AceGUI:Create("SimpleGroup")
-    encounterRowsContainer:SetFullWidth(true)
-    encounterRowsContainer:SetLayout("List")
-    frame:AddChild(encounterRowsContainer)
+    encounterTableHost = AceGUI:Create("SimpleGroup")
+    encounterTableHost:SetFullWidth(true)
+    encounterTableHost:SetHeight(225)
+    encounterTableHost:SetLayout("Fill")
+    frame:AddChild(encounterTableHost)
 
     rawInputText = ""
     encounters = {}
     notInSetup = ""
+    selectedStrategyIndex = 1
+    addon:UpdateStrategyButtonText()
+    addon:CreateEncounterTable()
 
     frame:SetCallback("OnClose", function(widget)
       AceGUI:Release(widget)
       frameShown = false
       frame = nil
       editbox = nil
-      encounterRowsContainer = nil
+      strategyButton = nil
+      encounterTable = nil
+      encounterTableHost = nil
       rawInputText = ""
       encounters = {}
     end)

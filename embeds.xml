@@ -7,5 +7,6 @@
 <Include file="Libs\AceTimer-3.0\AceTimer-3.0.xml" />
 <Include file="Libs\AceDB-3.0\AceDB-3.0.xml" />
 <Include file="Libs\AceEvent-3.0\AceEvent-3.0.xml" />
+<Include file="Libs\lib-st\lib-st.xml" />
 <!--@end-no-lib-strip@-->
 </Ui>
