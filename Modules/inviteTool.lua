@@ -1,12 +1,124 @@
 Wit = LibStub("AceAddon-3.0"):NewAddon("Wowaudit Invite Tool", "AceTimer-3.0")
 local addon = Wit
 local AceGUI = LibStub("AceGUI-3.0")
-local inviteString
 local invitingPreview
 local uninvitingPreview
 local notInSetup
 local frame
 local frameShown
+local editbox
+local encounterRowsContainer
+local rawInputText
+local encounters
+
+local function trim(text)
+  if not text then
+    return ""
+  end
+
+  return text:match("^%s*(.-)%s*$")
+end
+
+function addon:NormalizeInviteList(invitelistText)
+  local cleanedText = trim((invitelistText or ""):gsub("|", " "))
+  cleanedText = cleanedText:gsub("%s+", " ")
+
+  if cleanedText == "" then
+    return ""
+  end
+
+  return cleanedText:gsub(" ", "\n")
+end
+
+function addon:ParseEncounterPayload(payloadText)
+  local parsedEncounters = {}
+  local currentEncounter = nil
+  local normalizedPayload = (payloadText or ""):gsub("\r\n", "\n")
+
+  for rawLine in string.gmatch(normalizedPayload, "([^\n]+)") do
+    local line = trim(rawLine)
+
+    if line ~= "" then
+      local _, difficulty, encounterName = line:match("^EncounterID:([^;]+);Difficulty:([^;]+);Name:(.+)$")
+      if difficulty and encounterName then
+        currentEncounter = {
+          name = trim(encounterName),
+          difficulty = trim(difficulty),
+          inviteString = "",
+          hasInviteList = false,
+        }
+        table.insert(parsedEncounters, currentEncounter)
+      else
+        local inviteListText = line:match("^invitelist:(.*);$")
+        if inviteListText and currentEncounter and not currentEncounter.hasInviteList then
+          currentEncounter.inviteString = addon:NormalizeInviteList(inviteListText)
+          currentEncounter.hasInviteList = true
+        end
+      end
+    end
+  end
+
+  return parsedEncounters
+end
+
+function addon:RefreshEncounterRows()
+  if not encounterRowsContainer then
+    return
+  end
+
+  encounterRowsContainer:ReleaseChildren()
+
+  for _, encounter in ipairs(encounters or {}) do
+    local row = AceGUI:Create("SimpleGroup")
+    row:SetFullWidth(true)
+    row:SetLayout("Flow")
+
+    local difficultyInitial = string.sub(encounter.difficulty or "", 1, 1)
+    if difficultyInitial == "" then
+      difficultyInitial = "?"
+    end
+
+    local encounterLabel = AceGUI:Create("Label")
+    encounterLabel:SetWidth(130)
+    encounterLabel:SetText(string.format("%s (%s)", encounter.name or "Unknown Encounter", difficultyInitial))
+    row:AddChild(encounterLabel)
+
+    local replaceButton = AceGUI:Create("Button")
+    replaceButton:SetText("Invite and remove")
+    replaceButton:SetWidth(100)
+    replaceButton:SetCallback("OnClick", function() addon:Replace(false, encounter.inviteString) end)
+    row:AddChild(replaceButton)
+
+    local rearrangeButton = AceGUI:Create("Button")
+    rearrangeButton:SetText("Invite and rearrange")
+    rearrangeButton:SetWidth(120)
+    rearrangeButton:SetCallback("OnClick", function() addon:InviteAndRearrange(encounter.inviteString) end)
+    row:AddChild(rearrangeButton)
+
+    local inviteButton = AceGUI:Create("Button")
+    inviteButton:SetText("Invite only")
+    inviteButton:SetWidth(85)
+    inviteButton:SetCallback("OnClick", function() addon:InviteOnly(encounter.inviteString) end)
+    row:AddChild(inviteButton)
+
+    encounterRowsContainer:AddChild(row)
+  end
+end
+
+function addon:ResetInput()
+  rawInputText = ""
+  encounters = {}
+
+  if editbox then
+    editbox:SetText("")
+  end
+
+  addon:RefreshEncounterRows()
+
+  if frame then
+    frame:SetStatusText("")
+  end
+end
 
 function addon:CreateFrame()
   if frameShown then
@@ -14,109 +126,112 @@ function addon:CreateFrame()
   else
     frame = AceGUI:Create("Frame")
     frame:SetTitle("Wowaudit Invite Tool")
-    frame:SetLayout("Flow")
+    frame:SetLayout("List")
     frame:SetWidth(455)
-    frame:SetHeight(180)
+    frame:SetHeight(400)
     frame:EnableResize(false)
     frame.frame:SetFrameStrata("MEDIUM")
     frame.frame:Raise()
     frame.content:SetFrameStrata("MEDIUM")
     frame.content:Raise()
+    frameShown = true
 
     local horizontalGroup = AceGUI:Create("SimpleGroup")
     horizontalGroup:SetFullWidth(true)
     horizontalGroup:SetLayout("Flow")
 
     local editBoxGroup = AceGUI:Create("SimpleGroup")
-    editBoxGroup:SetWidth(240)
+    editBoxGroup:SetWidth(270)
     editBoxGroup:SetLayout("Fill")
 
-    local editbox = AceGUI:Create("MultiLineEditBox")
+    editbox = AceGUI:Create("MultiLineEditBox")
     editbox:SetLabel("Paste invite string here:")
     editbox:SetFullWidth(true)
-    editbox:SetNumLines(15)
-    editbox:SetCallback("OnTextChanged", function(widget, event, text) inviteString = text:gsub("|", ";"); inviteString = inviteString:gsub("[;]+", "\n"); editbox:SetText(inviteString) end)
+    editbox:SetNumLines(8)
+    editbox:SetCallback("OnTextChanged", function(_, _, text)
+      rawInputText = text or ""
+      encounters = addon:ParseEncounterPayload(rawInputText)
+      addon:RefreshEncounterRows()
+
+      if frame then
+        frame:SetStatusText(string.format("Parsed %d encounter(s)", #encounters))
+      end
+    end)
     editbox:DisableButton(true)
     editBoxGroup:AddChild(editbox)
 
 
     local buttonGroup = AceGUI:Create("SimpleGroup")
-    buttonGroup:SetWidth(180)
+    buttonGroup:SetWidth(160)
     buttonGroup:SetLayout("List")
 
-    local replaceButton = AceGUI:Create("Button")
-    replaceButton:SetText("Invite and remove")
-    replaceButton:SetWidth(180)
-    replaceButton:SetCallback("OnClick", function() addon:Replace(false) end)
-    buttonGroup:AddChild(replaceButton)
-
-    local rearrangeButton = AceGUI:Create("Button")
-    rearrangeButton:SetText("Invite and rearrange")
-    rearrangeButton:SetWidth(180)
-    rearrangeButton:SetCallback("OnClick", function() addon:InviteAndRearrange() end)
-    buttonGroup:AddChild(rearrangeButton)
-
-    local inviteButton = AceGUI:Create("Button")
-    inviteButton:SetText("Invite only")
-    inviteButton:SetWidth(180)
-    inviteButton:SetCallback("OnClick", function() addon:InviteOnly() end)
-    buttonGroup:AddChild(inviteButton)
+    local resetButton = AceGUI:Create("Button")
+    resetButton:SetText("Reset")
+    resetButton:SetWidth(150)
+    resetButton:SetCallback("OnClick", function() addon:ResetInput() end)
+    buttonGroup:AddChild(resetButton)
 
     horizontalGroup:AddChild(editBoxGroup)
     horizontalGroup:AddChild(buttonGroup)
 
     frame:AddChild(horizontalGroup)
 
+    encounterRowsContainer = AceGUI:Create("SimpleGroup")
+    encounterRowsContainer:SetFullWidth(true)
+    encounterRowsContainer:SetLayout("List")
+    frame:AddChild(encounterRowsContainer)
 
-    inviteString = ""
+    rawInputText = ""
+    encounters = {}
     notInSetup = ""
-    self.previewer = self:ScheduleRepeatingTimer("UpdatePreview", 0.1)
 
     frame:SetCallback("OnClose", function(widget)
       AceGUI:Release(widget)
       frameShown = false
-      self:CancelTimer(self.previewer)
+      frame = nil
+      editbox = nil
+      encounterRowsContainer = nil
+      rawInputText = ""
+      encounters = {}
     end)
   end
 end
 
-function addon:UpdatePreview()
-  addon:Replace(true)
-  notInSetup = ""
-end
-
-function addon:Replace(preview)
+function addon:Replace(preview, selectedInviteString)
   if not preview then
     C_PartyInfo.ConvertToRaid()
   end
 
-  addon:Uninvite(preview, false)
-  addon:Invite(preview)
+  addon:Uninvite(preview, false, selectedInviteString)
+  addon:Invite(preview, selectedInviteString)
 end
 
-function addon:InviteAndRearrange()
+function addon:InviteAndRearrange(selectedInviteString)
   C_PartyInfo.ConvertToRaid()
-  addon:Uninvite(false, true)
-  addon:InviteOnly()
+  addon:Uninvite(false, true, selectedInviteString)
+  addon:InviteOnly(selectedInviteString)
 end
 
-function addon:InviteOnly()
+function addon:InviteOnly(selectedInviteString)
   C_PartyInfo.ConvertToRaid()
   notInSetup = ""
-  addon:Invite(false)
+  addon:Invite(false, selectedInviteString)
 
   if (string.len(notInSetup) > 0) then
     print("These players are not in the setup but haven't been removed: "..notInSetup:sub(1, -3))
   end
 end
 
-function addon:Uninvite(preview, moveOnly)
+function addon:Uninvite(preview, moveOnly, selectedInviteString)
   invitingPreview = 0
   uninvitingPreview = 0
   local moveToEnd = {}
   local playersInGroup = {}
-  if not (string.len(inviteString) > 0) then
-    frame:SetStatusText("Removing "..uninvitingPreview.." | Inviting "..invitingPreview)
+  local currentInviteString = selectedInviteString or ""
+  if not (string.len(currentInviteString) > 0) then
+    if frame then
+      frame:SetStatusText("Removing "..uninvitingPreview.." | Inviting "..invitingPreview)
+    end
     return
   end
 
@@ -127,7 +242,7 @@ function addon:Uninvite(preview, moveOnly)
 		local nown = GetNumGroupMembers() or 0
 		if nown > 0 then
       local name, rank, subgroup = GetRaidRosterInfo(j)
-      if not string.find(name, "-") then
+      if name and not string.find(name, "-") then
         name = name.."-"..myRealm
       end
 
@@ -144,7 +259,7 @@ function addon:Uninvite(preview, moveOnly)
 
 			if name then
         local shouldRemain = false
-        for inviteTarget in string.gmatch(inviteString, "([^\n]+)") do
+        for inviteTarget in string.gmatch(currentInviteString, "([^\n]+)") do
           if inviteTarget == name then
             if preview then
               invitingPreview = invitingPreview - 1
@@ -237,9 +352,10 @@ function addon:Tablelength(T)
   return count
 end
 
-function addon:Invite(preview)
+function addon:Invite(preview, selectedInviteString)
   local groupSize = GetNumGroupMembers()
   local alreadyInGroup = {}
+  local currentInviteString = selectedInviteString or ""
   if groupSize ~= 0 then
     for i=1,groupSize do
       local name = GetRaidRosterInfo(i)
@@ -249,7 +365,7 @@ function addon:Invite(preview)
 
   local selfName, selfRealm = UnitFullName("player")
   -- Invite raid members in the string
-  for inviteTarget in string.gmatch(inviteString, "([^\n]+)") do
+  for inviteTarget in string.gmatch(currentInviteString, "([^\n]+)") do
     if preview then
       invitingPreview = invitingPreview + 1
     else
@@ -262,7 +378,9 @@ function addon:Invite(preview)
   end
 
   if preview then
-    frame:SetStatusText("Removing "..uninvitingPreview.." | Inviting "..invitingPreview)
+    if frame then
+      frame:SetStatusText("Removing "..uninvitingPreview.." | Inviting "..invitingPreview)
+    end
   end
 end
 
