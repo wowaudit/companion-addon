@@ -10,6 +10,9 @@ local defaults = {
       members = nil,
     },
   },
+  global = {
+    bonusRolls = {},
+  },
 }
 
 function DataSync:OnInitialize()

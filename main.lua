@@ -27,6 +27,14 @@ local function HandleExportSetup()
     end
 end
 
+local function HandleCoins()
+    if BonusRoll and BonusRoll.ShowWindow then
+        BonusRoll:ShowWindow()
+    else
+        print("[Wowaudit Companion] BonusRoll module not available")
+    end
+end
+
 local function HandleWowauditCommand(msg)
     msg = (msg or ""):trim():lower()
 
@@ -39,8 +47,11 @@ local function HandleWowauditCommand(msg)
     elseif msg == "export-setup" then
         HandleExportSetup()
 
+    elseif msg == "coins" then
+        HandleCoins()
+
     else
-        print("Usage: /wowaudit [sync|invite|export-setup]")
+        print("Usage: /wowaudit [sync|invite|export-setup|coins]")
     end
 end
 
