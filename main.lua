@@ -27,7 +27,7 @@ local function HandleExportSetup()
     end
 end
 
-local function HandleCoins()
+local function HandleBonusRolls()
     if BonusRoll and BonusRoll.ShowWindow then
         BonusRoll:ShowWindow()
     else
@@ -47,11 +47,11 @@ local function HandleWowauditCommand(msg)
     elseif msg == "export-setup" then
         HandleExportSetup()
 
-    elseif msg == "coins" then
-        HandleCoins()
+    elseif msg == "bonusrolls" or msg == "coins" then
+        HandleBonusRolls()
 
     else
-        print("Usage: /wowaudit [sync|invite|export-setup|coins]")
+        print("Usage: /wowaudit [sync|invite|export-setup|bonusrolls]")
     end
 end
 
