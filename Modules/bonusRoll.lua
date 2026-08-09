@@ -208,6 +208,7 @@ function addon:StoreRecord(name, record)
     cap = record.cap,
     updatedAt = record.updatedAt,
     classId = record.classId or existing.classId,
+    currencyId = record.currencyId or existing.currencyId,
   }
 end
 
@@ -248,6 +249,7 @@ function addon:GetLocalRecord()
     cap = info.maxQuantity or 0,
     updatedAt = time(),
     classId = classId,
+    currencyId = CURRENCY_ID,
   }
 
   local name = playerFullName()
@@ -328,6 +330,7 @@ function addon:ReplyWithLocalRecord(sender)
 
   addon:SendPayload("WHISPER", sender, {
     cmd = "RESP",
+    currencyId = record.currencyId,
     left = record.left,
     earned = record.earned,
     cap = record.cap,
@@ -356,6 +359,7 @@ function addon:OnCommReceived(_, msg, _, sender)
       cap = tonumber(payload.cap) or 0,
       updatedAt = tonumber(payload.updatedAt) or time(),
       classId = tonumber(payload.classId),
+      currencyId = tonumber(payload.currencyId),
     })
 
     if frameShown then
