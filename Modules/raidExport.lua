@@ -1,3 +1,5 @@
+if WowauditGameVersion ~= "live" then return end
+
 RaidExport = LibStub("AceAddon-3.0"):NewAddon("WowauditRaidExport", "AceEvent-3.0")
 local addon = RaidExport
 

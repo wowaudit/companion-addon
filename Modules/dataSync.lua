@@ -1,3 +1,5 @@
+if WowauditGameVersion ~= "live" then return end
+
 DataSync = LibStub("AceAddon-3.0"):NewAddon("WowauditDataSync", "AceEvent-3.0", "AceTimer-3.0")
 local AceDB = LibStub("AceDB-3.0")
 
@@ -12,6 +14,7 @@ local defaults = {
   },
   global = {
     bonusRolls = {},
+    crests = {},
   },
 }
 

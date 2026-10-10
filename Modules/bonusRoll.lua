@@ -1,9 +1,13 @@
+if WowauditGameVersion ~= "live" then return end
+
 BonusRoll = LibStub("AceAddon-3.0"):NewAddon("WowauditBonusRoll", "AceComm-3.0", "AceSerializer-3.0", "AceEvent-3.0", "AceTimer-3.0")
 local addon = BonusRoll
 local AceGUI = LibStub("AceGUI-3.0")
 local ScrollingTable = LibStub("ScrollingTable")
 
 local CURRENCY_ID = 3418
+-- Veteran / Champion / Hero / Myth, matching Season.current.metadata[:crests].
+local CREST_CURRENCY_IDS = { 3443, 3444, 3445, 3446 }
 local COMM_PREFIX = "WowauditCoins"
 local REQUEST_DEBOUNCE = 5
 local AUTO_REFRESH_DELAY = 19
@@ -193,6 +197,24 @@ local function recordsTable()
   return nil
 end
 
+local function crestsTable()
+  if DataSync and DataSync.db then
+    local g = DataSync.db.global
+    g.crests = g.crests or {}
+    return g.crests
+  end
+  return nil
+end
+
+local function collectLocalCrests()
+  local left = {}
+  for _, id in ipairs(CREST_CURRENCY_IDS) do
+    local info = C_CurrencyInfo.GetCurrencyInfo(id)
+    left[tostring(id)] = (info and info.quantity) or 0
+  end
+  return left
+end
+
 function addon:StoreRecord(name, record)
   if not name or not record then
     return
@@ -209,6 +231,26 @@ function addon:StoreRecord(name, record)
     updatedAt = record.updatedAt,
     classId = record.classId or existing.classId,
     currencyId = record.currencyId or existing.currencyId,
+  }
+end
+
+function addon:StoreCrests(name, left, updatedAt)
+  if not name or type(left) ~= "table" then
+    return
+  end
+  local records = crestsTable()
+  if not records then
+    return
+  end
+
+  local stored = {}
+  for id, amount in pairs(left) do
+    stored[tostring(id)] = tonumber(amount) or 0
+  end
+
+  records[name] = {
+    left = stored,
+    updatedAt = tonumber(updatedAt) or time(),
   }
 end
 
@@ -255,6 +297,7 @@ function addon:GetLocalRecord()
   local name = playerFullName()
   if name then
     addon:StoreRecord(name, record)
+    addon:StoreCrests(name, collectLocalCrests(), record.updatedAt)
   end
 
   return record
@@ -336,6 +379,8 @@ function addon:ReplyWithLocalRecord(sender)
     cap = record.cap,
     updatedAt = record.updatedAt,
     classId = record.classId,
+    crests = collectLocalCrests(),
+    crestsUpdatedAt = record.updatedAt,
   })
 end
 
@@ -361,6 +406,10 @@ function addon:OnCommReceived(_, msg, _, sender)
       classId = tonumber(payload.classId),
       currencyId = tonumber(payload.currencyId),
     })
+
+    if type(payload.crests) == "table" then
+      addon:StoreCrests(name, payload.crests, payload.crestsUpdatedAt or payload.updatedAt)
+    end
 
     if frameShown then
       addon:RefreshTable()

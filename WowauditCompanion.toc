@@ -1,6 +1,7 @@
-## Interface: 120007, 120100
-## Interface-Classic: 11502
-## Interface-Cata: 40400
+## Interface: 120007, 120100, 16001
+## Interface-Classic: 11509
+## Interface-BCC: 20506
+## Interface-Mists: 50504
 
 ## Title: Wowaudit Companion
 ## Description: Syncs game data to your wowaudit guild. Use "/wit" or "/wowaudit invite" to manage raid invites
@@ -18,9 +19,11 @@
 ## X-Curse-Project-ID: 384840
 ## X-Wago-ID: vNAevpNo
 
-## SavedVariables: WowauditDataSyncDB, WowauditInviteToolDB
+## SavedVariables: WowauditDataSyncDB, WowauditInviteToolDB, WowauditForeverSyncDB
 
 embeds.xml
+
+Core\gameVersion.lua
 
 Modules\inviteTool.lua
 Modules\raidExport.lua
@@ -28,6 +31,8 @@ Modules\raidExport.lua
 Modules\dataSync.lua
 Modules\sync\guildData.lua
 Modules\sync\neighborhoodData.lua
+
+Modules\forever\guildSync.lua
 
 Data\admin.lua
 Modules\bonusRoll.lua

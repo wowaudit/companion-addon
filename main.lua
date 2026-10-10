@@ -12,7 +12,9 @@ local function HandleInvite()
 end
 
 local function HandleSync()
-    if DataSync and DataSync.ManualSync then
+    if ForeverSync and ForeverSync.ManualSync then
+        ForeverSync:ManualSync()
+    elseif DataSync and DataSync.ManualSync then
         DataSync:ManualSync()
     else
         print("[Wowaudit Companion] DataSync module not available")

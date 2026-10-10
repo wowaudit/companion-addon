@@ -1,3 +1,5 @@
+if WowauditGameVersion ~= "live" then return end
+
 function DataSync:IsOwnGuildNeighborhood(metadata)
   local isGuildNeighborhood = metadata and metadata.neighborhoodOwnerType == 1
 

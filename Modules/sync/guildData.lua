@@ -1,3 +1,5 @@
+if WowauditGameVersion ~= "live" then return end
+
 function DataSync:RegisterGuildSyncEvents()
   self:RegisterEvent("GUILD_MOTD", "OnGuildMOTD")
 end
