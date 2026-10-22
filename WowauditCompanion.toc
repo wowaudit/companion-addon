@@ -1,4 +1,4 @@
-## Interface: 120007, 120100, 16001
+## Interface: 120007, 120105, 16001
 ## Interface-Classic: 11509
 ## Interface-BCC: 20506
 ## Interface-Mists: 50504
@@ -7,7 +7,7 @@
 ## Description: Syncs game data to your wowaudit guild. Use "/wit" or "/wowaudit invite" to manage raid invites
 ## Notes: Syncs game data to your wowaudit guild. Use "/wit" or "/wowaudit invite" to manage raid invites
 ## Author: Emiel van Lankveld
-## Version: 1.1.2
+## Version: 1.1.3
 ## X-Embeds: Ace3
 ## OptionalDependencies: Ace3
 ## IconTexture: Interface\AddOns\WowauditCompanion\Media\logo
@@ -33,6 +33,7 @@ Modules\sync\guildData.lua
 Modules\sync\neighborhoodData.lua
 
 Modules\forever\guildSync.lua
+Modules\forever\gearSync.lua
 
 Data\admin.lua
 Modules\bonusRoll.lua

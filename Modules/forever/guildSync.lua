@@ -1,6 +1,6 @@
 if WowauditGameVersion ~= "classic_forever" then return end
 
-ForeverSync = LibStub("AceAddon-3.0"):NewAddon("WowauditForeverSync", "AceEvent-3.0", "AceTimer-3.0")
+ForeverSync = LibStub("AceAddon-3.0"):NewAddon("WowauditForeverSync", "AceEvent-3.0", "AceTimer-3.0", "AceComm-3.0", "AceSerializer-3.0")
 local AceDB = LibStub("AceDB-3.0")
 
 local ROSTER_SYNC_DELAY = 2
@@ -65,15 +65,32 @@ local function currentRegion()
     or "Unknown"
 end
 
--- Camelot has no realm in character names: the roster returns "Name Surname".
+local function isOwnRealm(value)
+  local normalized = value:gsub("[%s%-]", "")
+  return normalized == (nonEmpty(safeCall(GetNormalizedRealmName)) or "")
+    or normalized == (nonEmpty(safeCall(GetRealmName)) or ""):gsub("[%s%-]", "")
+end
+
+-- Camelot has no realm in character names. Depending on the build the roster
+-- returns "Name Surname" or "Name-Surname"; a trailing realm is stripped.
 local function splitName(fullName)
-  fullName = fullName:gsub("%-.*$", ""):match("^%s*(.-)%s*$")
+  fullName = fullName:match("^%s*(.-)%s*$")
+  local base, suffix = fullName:match("^([^%-]+)%-(.+)$")
+  if base then
+    if isOwnRealm(suffix) then
+      fullName = base:match("^%s*(.-)%s*$")
+    else
+      return base:match("^%s*(.-)%s*$"), suffix
+    end
+  end
   local name, surname = fullName:match("^(%S+)%s+(.+)$")
   if name then
     return name, surname
   end
   return fullName, nil
 end
+
+ForeverSync.isOwnRealm = isOwnRealm
 
 local function raceForGuid(guid)
   if not guid or not GetPlayerInfoByGUID then return nil end
@@ -82,9 +99,16 @@ local function raceForGuid(guid)
   return nil
 end
 
+ForeverSync.CLASS_IDS = CLASS_IDS
+ForeverSync.currentRegion = currentRegion
+ForeverSync.splitName = splitName
+
 function ForeverSync:OnInitialize()
   self.db = AceDB:New("WowauditForeverSyncDB", defaults, true)
   self.db.global.gameVersion = "classic_forever"
+  -- Everything stored last session was uploaded by the desktop client when the
+  -- game wrote the file, so only this session's characters are kept.
+  self.db.global.characters = {}
 
   local getMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
   self.db.global.addonVersion = safeCall(getMetadata, "WowauditCompanion", "Version")
@@ -95,6 +119,7 @@ function ForeverSync:OnEnable()
   self:SafeRegisterEvent("PLAYER_GUILD_UPDATE", "OnPlayerGuildUpdate")
   self:SafeRegisterEvent("GUILD_ROSTER_UPDATE", "OnGuildRosterUpdate")
   self:SafeRegisterEvent("GUILD_MOTD", "OnGuildMOTD")
+  self:RegisterGearSyncEvents()
 end
 
 function ForeverSync:SafeRegisterEvent(event, method)
@@ -105,6 +130,7 @@ end
 function ForeverSync:OnPlayerEnteringWorld()
   requestRoster()
   self:ScheduleGuildDataSync(ENTER_WORLD_SYNC_DELAY)
+  self:ScheduleGearCapture()
 end
 
 function ForeverSync:OnPlayerGuildUpdate()
@@ -242,6 +268,7 @@ end
 
 function ForeverSync:ManualSync()
   requestRoster()
+  self:CaptureGear()
   if not self:SyncGuildData() then
     print("You are not in a guild, did not sync guild data.")
     return
