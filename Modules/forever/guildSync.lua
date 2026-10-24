@@ -104,6 +104,12 @@ ForeverSync.currentRegion = currentRegion
 ForeverSync.splitName = splitName
 
 function ForeverSync:OnInitialize()
+  -- Guild data from earlier sessions was already uploaded, and re-uploading it later
+  -- could revert newer data, so only guilds synced this session are kept.
+  if WowauditForeverSyncDB then
+    WowauditForeverSyncDB.profiles = nil
+  end
+
   self.db = AceDB:New("WowauditForeverSyncDB", defaults, true)
   self.db.global.gameVersion = "classic_forever"
   -- Everything stored last session was uploaded by the desktop client when the
@@ -119,6 +125,7 @@ function ForeverSync:OnEnable()
   self:SafeRegisterEvent("PLAYER_GUILD_UPDATE", "OnPlayerGuildUpdate")
   self:SafeRegisterEvent("GUILD_ROSTER_UPDATE", "OnGuildRosterUpdate")
   self:SafeRegisterEvent("GUILD_MOTD", "OnGuildMOTD")
+  self:SafeRegisterEvent("PLAYER_LOGOUT", "OnPlayerLogout")
   self:RegisterGearSyncEvents()
 end
 
@@ -159,8 +166,34 @@ function ForeverSync:ScheduleGuildDataSync(delay)
 
   self.syncTimer = self:ScheduleTimer(function()
     self.syncTimer = nil
-    self:SyncGuildData()
+    self:RunScheduledGuildDataSync()
   end, delay)
+end
+
+-- Reading the roster loops over every guild member, so it waits until combat ends.
+function ForeverSync:RunScheduledGuildDataSync()
+  if InCombatLockdown() then
+    if not self.syncPending then
+      self.syncPending = true
+      self:SafeRegisterEvent("PLAYER_REGEN_ENABLED", "OnPlayerRegenEnabled")
+    end
+    return
+  end
+
+  self:SyncGuildData()
+end
+
+function ForeverSync:OnPlayerRegenEnabled()
+  self.syncPending = false
+  self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+  self:SyncGuildData()
+end
+
+-- SavedVariables are written right after logout, so a sync that is still waiting runs now.
+function ForeverSync:OnPlayerLogout()
+  if self.syncPending or self.syncTimer then
+    self:SyncGuildData()
+  end
 end
 
 function ForeverSync:SetGuildProfile()
