@@ -12,13 +12,12 @@ local COMM_PREFIX = "WowauditSimc"
 local PAYLOAD_VERSION = 1
 local MAX_REPLY_DELAY = 10
 local ROSTER_DEBOUNCE = 5
-local GROUP_REQUEST_THROTTLE = 60
-local MAX_WHISPERED_REQUESTS = 3
+-- Equipping a gear set changes every slot at once, so the own export waits until changes settle.
+local OWN_EXPORT_DEBOUNCE = 10
 local PRUNE_AFTER = 30 * 24 * 60 * 60
 local MAX_EXPORT_LENGTH = 60000
 
 local requestedMembers = {}
-local lastGroupRequestAt = 0
 local replyTimers = {}
 local deferredReplies = {}
 
@@ -163,25 +162,46 @@ function addon:KnownHashes(name)
   return hashes
 end
 
+function addon:ScheduleOwnExport()
+  if not isAdmin() then
+    return
+  end
+  if self.ownExportTimer then
+    self:CancelTimer(self.ownExportTimer)
+  end
+
+  self.ownExportTimer = self:ScheduleTimer(function()
+    addon.ownExportTimer = nil
+    addon:StoreOwnExport()
+  end, OWN_EXPORT_DEBOUNCE)
+end
+
 function addon:StoreOwnExport()
   if InCombatLockdown() then
+    self.ownExportDeferred = true
+    return
+  end
+  self.ownExportDeferred = false
+
+  local name, specId, text = playerFullName(), currentSpecId(), generateExport()
+  if not specId or not text then
     return
   end
 
-  local text = generateExport()
-  if text then
-    self:StoreExport(playerFullName(), currentSpecId(), text, time())
+  local hash = exportHash(text)
+  local known = self:KnownHashes(name)
+  if known and known[specId] == hash then
+    return
   end
+  self:StoreExport(name, specId, text, time(), hash)
 end
 
-function addon:RequestFromGroup(force)
+-- The whole group is asked in a single message. Members answer by whisper, and only when
+-- their export differs from the one we already have.
+function addon:RequestFromGroup()
   if not isAdmin() or not IsInGroup() then
     return
   end
-  if not force and GetTime() - lastGroupRequestAt < GROUP_REQUEST_THROTTLE then
-    return
-  end
-  lastGroupRequestAt = GetTime()
 
   local known = {}
   for _, name in ipairs(onlineGroupMembers()) do
@@ -190,34 +210,15 @@ function addon:RequestFromGroup(force)
   end
 
   self:SendCommMessage(COMM_PREFIX, self:Serialize("REQ", known), groupChannel())
-  self:StoreOwnExport()
 end
 
--- Mirrors the wishlist handshake: players are asked once per session, when they join the
--- group or when the admin joins theirs. A few newcomers are whispered, a new group is asked at once.
+-- Players are asked once per session, when they join the group or when the admin joins theirs.
 function addon:RequestFromNewMembers()
-  if not isAdmin() or not IsInGroup() then
-    return
-  end
-
-  local newcomers = {}
   for _, name in ipairs(onlineGroupMembers()) do
     if not requestedMembers[name] then
-      newcomers[#newcomers + 1] = name
+      self:RequestFromGroup()
+      return
     end
-  end
-  if #newcomers == 0 then
-    return
-  end
-
-  if #newcomers > MAX_WHISPERED_REQUESTS then
-    self:RequestFromGroup(true)
-    return
-  end
-
-  for _, name in ipairs(newcomers) do
-    requestedMembers[name] = true
-    self:SendCommMessage(COMM_PREFIX, self:Serialize("REQ", { [name] = self:KnownHashes(name) }), "WHISPER", name)
   end
 end
 
@@ -276,7 +277,7 @@ function addon:SubscribeToLootCouncil()
   self.lootCouncilSubscribed = true
   comms:Subscribe(lootCouncil.PREFIXES.MAIN, "session_end", function()
     addon:ScheduleTimer(function()
-      addon:RequestFromGroup(true)
+      addon:RequestFromGroup()
     end, MAX_REPLY_DELAY)
   end)
 end
@@ -352,7 +353,7 @@ function addon:OnRosterChanged()
     return
   end
   if self.rosterTimer then
-    return
+    self:CancelTimer(self.rosterTimer)
   end
 
   self.rosterTimer = self:ScheduleTimer(function()
@@ -361,11 +362,26 @@ function addon:OnRosterChanged()
   end, ROSTER_DEBOUNCE)
 end
 
+function addon:PLAYER_ENTERING_WORLD()
+  self:OnRosterChanged()
+  self:ScheduleOwnExport()
+end
+
+function addon:PLAYER_SPECIALIZATION_CHANGED(_, unit)
+  if unit == "player" then
+    self:ScheduleOwnExport()
+  end
+end
+
 function addon:PLAYER_REGEN_ENABLED()
   local replies = deferredReplies
   deferredReplies = {}
   for sender, knownForMe in pairs(replies) do
     self:ScheduleReply(sender, knownForMe or nil)
+  end
+
+  if self.ownExportDeferred then
+    self:ScheduleOwnExport()
   end
 end
 
@@ -377,6 +393,9 @@ function addon:OnEnable()
   self:Prune()
   self:SubscribeToLootCouncil()
   self:RegisterEvent("GROUP_ROSTER_UPDATE", "OnRosterChanged")
-  self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnRosterChanged")
+  self:RegisterEvent("PLAYER_ENTERING_WORLD")
+  self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED", "ScheduleOwnExport")
+  self:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+  self:RegisterEvent("TRAIT_CONFIG_UPDATED", "ScheduleOwnExport")
   self:RegisterEvent("PLAYER_REGEN_ENABLED")
 end
