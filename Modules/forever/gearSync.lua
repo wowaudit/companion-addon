@@ -80,6 +80,8 @@ local function collectProfessions()
   return professions
 end
 
+ForeverSync.collectProfessions = collectProfessions
+
 -- Newer builds return the surname as UnitName's second value, older ones as
 -- "Name Surname"; the guild roster entry for the unit's GUID is the last fallback.
 local function unitNameParts(unit)
@@ -150,6 +152,8 @@ function ForeverSync:RegisterGearSyncEvents()
   self:RegisterComm(COMM_PREFIX, "OnGearCommReceived")
   self:SafeRegisterEvent("ZONE_CHANGED_NEW_AREA", "ScheduleGearCapture")
   self:SafeRegisterEvent("INSPECT_READY", "OnInspectReady")
+  self:RegisterRecipeSyncEvents()
+  self:RegisterPvpSyncEvents()
 end
 
 function ForeverSync:ScheduleGearCapture()
@@ -197,6 +201,8 @@ function ForeverSync:BuildOwnRecord()
   local record = self:BuildRecord("player", (collectGear("player")), ownGuildName())
   if record then
     record.professions = collectProfessions()
+    record.recipes, record.recipesUpdatedAt = self:OwnRecipes(record.professions)
+    record.pvp = self.collectOwnPvp()
   end
   return record
 end
@@ -224,8 +230,8 @@ function ForeverSync:OnInspectReady(_, guid)
   self:CaptureInspect(guid, 1)
 end
 
--- Inspected records have no professions (the API doesn't expose them) and only
--- carry a guild when the game shows one, so a missing guild isn't read as "left".
+-- Inspected records have no professions or recipes (the API doesn't expose them) and no PvP
+-- rank, and only carry a guild when the game shows one, so a missing guild isn't read as "left".
 function ForeverSync:CaptureInspect(guid, attempt)
   local unit = guid and unitForGuid(guid)
   if not unit or not UnitIsPlayer(unit) or UnitIsUnit(unit, "player") then return end
@@ -253,8 +259,16 @@ function ForeverSync:StoreCharacter(record)
   local existing = characters[key]
   if existing and (existing.updatedAt or 0) >= record.updatedAt then return end
 
-  if record.professions == nil and existing then
-    record.professions = existing.professions
+  if existing then
+    if record.professions == nil then
+      record.professions = existing.professions
+    end
+    if record.recipes == nil then
+      record.recipes, record.recipesUpdatedAt = existing.recipes, existing.recipesUpdatedAt
+    end
+    if record.pvp == nil then
+      record.pvp = existing.pvp
+    end
   end
   characters[key] = record
 end
@@ -277,15 +291,19 @@ function ForeverSync:BroadcastGear(record, force)
 
   local gear = encodeGear(record.gear)
   local professions = encodeProfessions(record.professions)
-  local fingerprint = gear .. "|" .. professions
+  local recipes = self.encodeRecipes(record.recipes)
+  local pvp = self.encodePvp(record.pvp)
+  local fingerprint = gear .. "|" .. professions .. "|" .. (recipes or "") .. "|" .. (pvp or "")
   local recentlySent = self.lastGearSentAt and (GetTime() - self.lastGearSentAt) < RESEND_AFTER
   if not force and fingerprint == self.lastGearFingerprint and recentlySent then return end
 
   self.lastGearFingerprint = fingerprint
   self.lastGearSentAt = GetTime()
 
+  -- Recipes and PvP data are trailing fields, so admins on older versions ignore them.
   local message = self:Serialize("GEAR", PAYLOAD_VERSION, record.name, record.surname, record.realm or "",
-    record.classId, record.level, record.updatedAt, gear, professions, record.raceFile, record.faction)
+    record.classId, record.level, record.updatedAt, gear, professions, record.raceFile, record.faction,
+    recipes, recipes and record.recipesUpdatedAt or nil, pvp, pvp and record.pvp.updatedAt or nil)
   self:SendCommMessage(COMM_PREFIX, message, "GUILD")
 end
 
@@ -320,7 +338,7 @@ end
 function ForeverSync:OnGearCommReceived(prefix, message, distribution)
   if prefix ~= COMM_PREFIX or distribution ~= "GUILD" then return end
 
-  local ok, command, version, name, surname, realm, classId, level, updatedAt, gear, professions, raceFile, faction = self:Deserialize(message)
+  local ok, command, version, name, surname, realm, classId, level, updatedAt, gear, professions, raceFile, faction, recipes, recipesUpdatedAt, pvp, pvpUpdatedAt = self:Deserialize(message)
   if not ok then return end
 
   if command == "REQ" then
@@ -342,6 +360,11 @@ function ForeverSync:OnGearCommReceived(prefix, message, distribution)
   if raceFile ~= nil and (type(raceFile) ~= "string" or #raceFile > 32 or not raceFile:match("^%a+$")) then return end
   if faction ~= nil and faction ~= "Alliance" and faction ~= "Horde" then return end
 
+  -- Senders on older versions don't send recipes or PvP data; an invalid field is dropped without
+  -- rejecting the gear, and StoreCharacter then keeps what we already had.
+  local decodedRecipes = self.isValidRecipeTimestamp(recipesUpdatedAt) and self.decodeRecipes(recipes) or nil
+  local decodedPvp = self.decodePvp(pvp, pvpUpdatedAt)
+
   -- The message arrived on the guild channel, so the sender shares our guild.
   self:StoreCharacter({
     name = name,
@@ -356,5 +379,8 @@ function ForeverSync:OnGearCommReceived(prefix, message, distribution)
     updatedAt = updatedAt,
     gear = decodedGear,
     professions = decodedProfessions,
+    recipes = decodedRecipes,
+    recipesUpdatedAt = decodedRecipes and recipesUpdatedAt or nil,
+    pvp = decodedPvp,
   })
 end

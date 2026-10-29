@@ -9,7 +9,7 @@
 ## Author: Emiel van Lankveld
 ## Version: 1.1.4
 ## X-Embeds: Ace3
-## OptionalDependencies: Ace3
+## OptionalDependencies: Ace3, Simulationcraft, RCLootCouncil
 ## IconTexture: Interface\AddOns\WowauditCompanion\Media\logo
 
 ## LoadManagers: AddonLoader
@@ -34,8 +34,11 @@ Modules\sync\neighborhoodData.lua
 
 Modules\forever\guildSync.lua
 Modules\forever\gearSync.lua
+Modules\forever\recipeSync.lua
+Modules\forever\pvpSync.lua
 
 Data\admin.lua
 Modules\bonusRoll.lua
+Modules\simcExport.lua
 
 main.lua

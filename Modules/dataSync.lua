@@ -15,6 +15,7 @@ local defaults = {
   global = {
     bonusRolls = {},
     crests = {},
+    simcExports = {},
   },
 }
 
