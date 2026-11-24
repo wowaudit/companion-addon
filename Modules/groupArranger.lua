@@ -1,6 +1,7 @@
 -- Moves raid members into the exact group and in-group position listed in a
 -- positional invite list (5 fields per group). The raid roster only reflects
--- a change after GROUP_ROSTER_UPDATE, so a single move is issued per update.
+-- a change after GROUP_ROSTER_UPDATE, so the next move waits until the roster
+-- shows the previous one.
 WowauditGroupArranger = {}
 local arranger = WowauditGroupArranger
 
@@ -10,6 +11,9 @@ local SLOT_COUNT = GROUP_SIZE * GROUP_COUNT
 local UPDATE_TIMEOUT = 2
 local STALL_TIMEOUT = 15
 local MAX_OPERATIONS = 200
+-- Fixing a position takes three swaps that can temporarily misplace more
+-- members, so a few moves without improvement are expected.
+local MAX_MOVES_WITHOUT_PROGRESS = 10
 local DEFAULT_WATCH_DURATION = 120
 
 local state = nil
@@ -78,7 +82,8 @@ end
 -- Listed players are compacted per group in list order because positions in a
 -- group follow the roster order, so a gap inside a group cannot exist in-game.
 -- The leader always shows first in their group, so they lead their target group.
-local function assignTargets(roster, slots)
+-- Without exact positions, listed members only need to end up in their group.
+local function assignTargets(roster, slots, exactPositions)
   local _, selfRealm = UnitFullName("player")
   local groups = {}
   for group = 1, GROUP_COUNT do
@@ -91,7 +96,7 @@ local function assignTargets(roster, slots)
     local member = key ~= "" and roster.byName[key] or nil
     if member and not listed[member.key] then
       listed[member.key] = true
-      member.flexible = false
+      member.flexible = not exactPositions
       table.insert(groups[math.ceil(slot / GROUP_SIZE)], member)
     end
   end
@@ -159,22 +164,24 @@ local function assignTargets(roster, slots)
   return groups
 end
 
-local function isArranged(groups)
+local function misplacedNames(groups)
+  local names = {}
   for group = 1, GROUP_COUNT do
     for position, member in ipairs(groups[group]) do
-      if member.subgroup ~= group then
-        return false
-      end
-      if not member.flexible and member.pos ~= position then
-        return false
+      local misplaced = member.subgroup ~= group or (not member.flexible and member.pos ~= position)
+      if misplaced then
+        table.insert(names, member.name)
       end
     end
   end
-  return true
+  return names
 end
 
+-- Every move changes the subgroup of the members involved, which is what the
+-- next roster has to show before the move counts as applied.
 local function swap(first, second)
   SwapRaidSubgroup(first.index, second.index)
+  state.expectedSubgroups = { [first.key] = second.subgroup, [second.key] = first.subgroup }
   return true
 end
 
@@ -186,9 +193,21 @@ local function moveIntoGroup(roster, member, group)
   end
   if roster.groupSize[group] < GROUP_SIZE then
     SetRaidSubgroup(member.index, group)
+    state.expectedSubgroups = { [member.key] = group }
     return true
   end
   return false
+end
+
+-- Members that left the raid can't show the move anymore, so they don't hold it up.
+local function operationApplied(roster)
+  for key, subgroup in pairs(state.expectedSubgroups or {}) do
+    local member = roster.byName[key]
+    if member and member.subgroup ~= subgroup then
+      return false
+    end
+  end
+  return true
 end
 
 local function runPendingSwap(roster)
@@ -248,17 +267,20 @@ local function fixPositions(roster, groups)
   return false
 end
 
-local function blockedNames(groups)
-  local names = {}
-  for group = 1, GROUP_COUNT do
-    for position, member in ipairs(groups[group]) do
-      local misplaced = member.subgroup ~= group or (not member.flexible and member.pos ~= position)
-      if misplaced then
-        table.insert(names, member.name)
-      end
-    end
+-- Progress is a drop in misplaced members rather than any move, so a move
+-- sequence that doesn't converge stops early. Joins and leaves change what is
+-- achievable, so they start a fresh count.
+local function trackProgress(roster, misplacedCount, now)
+  if #roster.members ~= state.rosterSize then
+    state.rosterSize = #roster.members
+    state.fewestMisplaced = misplacedCount
+    state.movesWithoutProgress = 0
+    state.lastProgressAt = now
+  elseif misplacedCount < state.fewestMisplaced then
+    state.fewestMisplaced = misplacedCount
+    state.movesWithoutProgress = 0
+    state.lastProgressAt = now
   end
-  return names
 end
 
 local function finish(message)
@@ -292,17 +314,21 @@ function arranger:Step()
     return
   end
 
-  if state.awaitingUpdate and now - state.lastOperationAt < UPDATE_TIMEOUT then
-    return
-  end
-  state.awaitingUpdate = false
-
   local roster = buildRoster()
-  local groups = assignTargets(roster, state.slots)
+  if state.awaitingUpdate then
+    if not operationApplied(roster) and now - state.lastOperationAt < UPDATE_TIMEOUT then
+      return
+    end
+    state.awaitingUpdate = false
+    state.expectedSubgroups = nil
+  end
 
-  if isArranged(groups) then
+  local groups = assignTargets(roster, state.slots, state.exactPositions)
+  local misplaced = misplacedNames(groups)
+  trackProgress(roster, #misplaced, now)
+
+  if #misplaced == 0 then
     state.pendingSwap = nil
-    state.lastProgressAt = now
     if not state.arranged then
       state.arranged = true
       if not state.watchUntil then
@@ -318,18 +344,26 @@ function arranger:Step()
     return
   end
 
+  -- While watching, a roster change resets the count and allows another attempt.
+  if state.movesWithoutProgress >= MAX_MOVES_WITHOUT_PROGRESS then
+    state.pendingSwap = nil
+    if not state.watchUntil then
+      finish("Could not finish arranging groups: " .. table.concat(misplaced, ", "))
+    end
+    return
+  end
+
   local moved = runPendingSwap(roster) or fixGroups(roster, groups) or fixPositions(roster, groups)
   if moved then
     state.operations = state.operations + 1
+    state.movesWithoutProgress = state.movesWithoutProgress + 1
     state.awaitingUpdate = true
     state.lastOperationAt = now
-    state.lastProgressAt = now
     return
   end
 
   if not state.watchUntil and now - state.lastProgressAt > STALL_TIMEOUT then
-    local names = blockedNames(groups)
-    finish("Could not finish arranging groups (players in combat?): " .. table.concat(names, ", "))
+    finish("Could not finish arranging groups (players in combat?): " .. table.concat(misplaced, ", "))
   end
 end
 
@@ -343,12 +377,15 @@ end
 
 -- slots: array of up to 40 names where index 1-5 is group 1, 6-10 group 2, etc.
 -- options.watch keeps arranging new raid members for options.duration seconds.
+-- options.exactPositions = false only enforces groups, for lists without positions.
 function arranger:Start(slots, options)
   options = options or {}
   local now = GetTime()
   state = {
     slots = slots or {},
+    exactPositions = options.exactPositions ~= false,
     operations = 0,
+    movesWithoutProgress = 0,
     awaitingUpdate = false,
     lastOperationAt = 0,
     lastProgressAt = now,
@@ -388,8 +425,5 @@ function arranger:IsActive()
 end
 
 eventFrame:SetScript("OnEvent", function()
-  if state then
-    state.awaitingUpdate = false
-    arranger:ScheduleStep()
-  end
+  arranger:ScheduleStep()
 end)

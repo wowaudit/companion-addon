@@ -363,7 +363,7 @@ function addon:RunStrategyForEncounter(rowData)
   if strategy.key == "replace" then
     addon:Replace(rowData.inviteString)
   elseif strategy.key == "rearrange" then
-    addon:InviteAndRearrange(rowData.inviteString, rowData.slots or rowData.inviteNames)
+    addon:InviteAndRearrange(rowData.inviteString, rowData.slots or rowData.inviteNames, hasPositionalSlots(rowData))
   else
     addon:InviteOnly(rowData.inviteString)
   end
@@ -581,11 +581,11 @@ function addon:Replace(selectedInviteString)
   addon:Invite(selectedInviteString)
 end
 
-function addon:InviteAndRearrange(selectedInviteString, slots)
+function addon:InviteAndRearrange(selectedInviteString, slots, exactPositions)
   C_PartyInfo.ConvertToRaid()
   addon:Invite(selectedInviteString)
   addon:PrintNotInSetup(selectedInviteString)
-  WowauditGroupArranger:Start(slots, { watch = true })
+  WowauditGroupArranger:Start(slots, { watch = true, exactPositions = exactPositions })
 end
 
 function addon:InviteOnly(selectedInviteString)
