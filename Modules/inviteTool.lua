@@ -2,7 +2,6 @@ Wit = LibStub("AceAddon-3.0"):NewAddon("Wowaudit Invite Tool", "AceTimer-3.0")
 local addon = Wit
 local AceGUI = LibStub("AceGUI-3.0")
 local ScrollingTable = LibStub("ScrollingTable")
-local notInSetup
 local frame
 local frameShown
 local editbox
@@ -21,44 +20,54 @@ local inviteStrategies = {
 }
 local selectedStrategyIndex = 1
 
-local function updateInviteActionCellStyle(cellFrame, isHovered)
-  if not cellFrame then
+local INVITE_COLUMN = 5
+local ARRANGE_COLUMN = 6
+
+local function updateActionCellStyle(cellFrame, isHovered)
+  if not cellFrame or not cellFrame.actionButton then
     return
   end
 
-  if not cellFrame.inviteActionButton then
-    local actionButton = CreateFrame("Button", nil, cellFrame, "UIPanelButtonTemplate")
-    actionButton:SetPoint("CENTER", cellFrame, "CENTER", 0, 0)
-    actionButton:SetSize(70, 16)
-    actionButton:SetText("Invite")
-    actionButton:EnableMouse(false)
-    actionButton:SetFrameLevel(cellFrame:GetFrameLevel() + 1)
-    cellFrame.inviteActionButton = actionButton
-  end
-
-  local actionButton = cellFrame.inviteActionButton
-  if isHovered then
+  local actionButton = cellFrame.actionButton
+  if isHovered and actionButton:IsEnabled() then
     actionButton:LockHighlight()
   else
     actionButton:UnlockHighlight()
   end
 end
 
-local function inviteActionCellUpdate(_, cellFrame, data, _, _, realrow, column, fShow, tableRef)
-  if not fShow then
-    if cellFrame and cellFrame.inviteActionButton then
-      cellFrame.inviteActionButton:Hide()
+local function actionCellUpdate(label, isEnabled)
+  return function(_, cellFrame, data, _, _, realrow, column, fShow, tableRef)
+    if not fShow then
+      if cellFrame and cellFrame.actionButton then
+        cellFrame.actionButton:Hide()
+      end
+      if cellFrame and cellFrame.text then
+        cellFrame.text:SetText("")
+      end
+      return
     end
-    if cellFrame and cellFrame.text then
-      cellFrame.text:SetText("")
-    end
-    return
-  end
 
-  cellFrame.text:SetText("")
-  cellFrame.inviteActionHovered = false
-  updateInviteActionCellStyle(cellFrame, false)
-  cellFrame.inviteActionButton:Show()
+    if not cellFrame.actionButton then
+      local actionButton = CreateFrame("Button", nil, cellFrame, "UIPanelButtonTemplate")
+      actionButton:SetPoint("CENTER", cellFrame, "CENTER", 0, 0)
+      actionButton:SetSize(70, 16)
+      actionButton:EnableMouse(false)
+      actionButton:SetFrameLevel(cellFrame:GetFrameLevel() + 1)
+      cellFrame.actionButton = actionButton
+    end
+
+    local rowData = data and realrow and data[realrow]
+    cellFrame.text:SetText("")
+    cellFrame.actionButton:SetText(label)
+    cellFrame.actionButton:SetEnabled(not isEnabled or (rowData and isEnabled(rowData)) or false)
+    updateActionCellStyle(cellFrame, false)
+    cellFrame.actionButton:Show()
+  end
+end
+
+local function hasPositionalSlots(rowData)
+  return rowData.slots ~= nil
 end
 
 local function trim(text)
@@ -69,15 +78,44 @@ local function trim(text)
   return text:match("^%s*(.-)%s*$")
 end
 
-function addon:NormalizeInviteList(invitelistText)
-  local cleanedText = trim((invitelistText or ""):gsub("|", " "))
-  cleanedText = cleanedText:gsub("%s+", " ")
+-- Matches the NSRT format: a list containing "," or ";" is positional (5 fields
+-- per group, empty fields keep a position free), otherwise names are separated
+-- by whitespace. Older wowaudit notes ended a whitespace list with a single ";".
+function addon:ParseInviteList(invitelistText)
+  local text = trim(invitelistText or "")
+  local legacyText = text:gsub(";$", "")
+  local isPositional = text:find(",", 1, true) or legacyText:find(";", 1, true)
+  local names = {}
 
-  if cleanedText == "" then
-    return ""
+  if not isPositional then
+    for name in legacyText:gmatch("([^%s]+)") do
+      table.insert(names, name)
+    end
+    return names, nil
   end
 
-  return cleanedText:gsub(" ", "\n")
+  local slots = {}
+  for field in (text:gsub(";", ",") .. ","):gmatch("(.-),") do
+    local name = trim(field)
+    table.insert(slots, name)
+    if name ~= "" then
+      table.insert(names, name)
+    end
+  end
+  return names, slots
+end
+
+local function parseEncounterHeader(line)
+  if not line:match("^EncounterID:") then
+    return nil
+  end
+
+  local difficulty = line:match(";Difficulty:([^;]+)")
+  local encounterName = line:match(";Name:(.-);%a+:") or line:match(";Name:(.+)$")
+  if not difficulty or not encounterName then
+    return nil
+  end
+  return trim(difficulty), trim(encounterName)
 end
 
 function addon:EnsureInviteToolDB()
@@ -197,20 +235,37 @@ function addon:ParseEncounterPayload(payloadText)
     local line = trim(rawLine)
 
     if line ~= "" then
-      local _, difficulty, encounterName = line:match("^EncounterID:([^;]+);Difficulty:([^;]+);Name:(.+)$")
+      local difficulty, encounterName = parseEncounterHeader(line)
       if difficulty and encounterName then
         currentEncounter = {
-          name = trim(encounterName),
-          difficulty = trim(difficulty),
+          name = encounterName,
+          difficulty = difficulty,
           inviteString = "",
+          inviteNames = {},
+          slots = nil,
           hasInviteList = false,
           label = "",
         }
         table.insert(parsedEncounters, currentEncounter)
       else
-        local inviteListText = line:match("^invitelist:(.*);$")
-        if inviteListText and currentEncounter and not currentEncounter.hasInviteList then
-          currentEncounter.inviteString = addon:NormalizeInviteList(inviteListText)
+        local inviteListText = line:match("^invitelist:%s*(.*)$")
+        if inviteListText and not currentEncounter then
+          currentEncounter = {
+            name = "Invite list",
+            difficulty = "",
+            inviteString = "",
+            inviteNames = {},
+            slots = nil,
+            hasInviteList = false,
+            label = "",
+          }
+          table.insert(parsedEncounters, currentEncounter)
+        end
+        if inviteListText and not currentEncounter.hasInviteList then
+          local names, slots = addon:ParseInviteList(inviteListText)
+          currentEncounter.inviteNames = names
+          currentEncounter.inviteString = table.concat(names, "\n")
+          currentEncounter.slots = slots
           currentEncounter.hasInviteList = true
           currentEncounter.label = addon:GetEncounterLabel(currentEncounter)
         end
@@ -239,6 +294,8 @@ function addon:RefreshEncounterTable()
     table.insert(tableData, {
       encounterName = encounter.label,
       inviteString = encounter.inviteString,
+      inviteNames = encounter.inviteNames,
+      slots = encounter.slots,
       cols = {
         encounter.label,
         addon:GetDifficultyShortLabel(encounter),
@@ -252,6 +309,10 @@ function addon:RefreshEncounterTable()
         },
         {
           value = "Invite",
+          color = { r = 0.2, g = 0.8, b = 1.0, a = 1.0 },
+        },
+        {
+          value = "Arrange",
           color = { r = 0.2, g = 0.8, b = 1.0, a = 1.0 },
         },
       },
@@ -297,14 +358,14 @@ function addon:SetStrategy(index)
   addon:UpdateStrategyButtonText()
 end
 
-function addon:RunStrategyForEncounter(inviteString)
+function addon:RunStrategyForEncounter(rowData)
   local strategy = inviteStrategies[selectedStrategyIndex]
   if strategy.key == "replace" then
-    addon:Replace(inviteString)
+    addon:Replace(rowData.inviteString)
   elseif strategy.key == "rearrange" then
-    addon:InviteAndRearrange(inviteString)
+    addon:InviteAndRearrange(rowData.inviteString, rowData.slots or rowData.inviteNames)
   else
-    addon:InviteOnly(inviteString)
+    addon:InviteOnly(rowData.inviteString)
   end
 end
 
@@ -318,7 +379,8 @@ function addon:CreateEncounterTable()
     { name = "Difficulty", width = 64, align = "CENTER" },
     { name = "To invite", width = 58, align = "CENTER" },
     { name = "To remove", width = 58, align = "CENTER" },
-    { name = "Action", width = 74, align = "CENTER", DoCellUpdate = inviteActionCellUpdate },
+    { name = "Action", width = 74, align = "CENTER", DoCellUpdate = actionCellUpdate("Invite") },
+    { name = "Arrange", width = 74, align = "CENTER", DoCellUpdate = actionCellUpdate("Arrange", hasPositionalSlots) },
   }
 
   encounterTable = ScrollingTable:CreateST(columns, 10, 18, nil, encounterTableHost.frame)
@@ -333,9 +395,8 @@ function addon:CreateEncounterTable()
         tableRef:SetHighLightColor(rowFrame, tableRef:GetDefaultHighlight())
       end
 
-      if row and column == 5 then
-        cellFrame.inviteActionHovered = true
-        updateInviteActionCellStyle(cellFrame, true)
+      if row and (column == INVITE_COLUMN or column == ARRANGE_COLUMN) then
+        updateActionCellStyle(cellFrame, true)
       end
 
       return true
@@ -345,18 +406,26 @@ function addon:CreateEncounterTable()
         tableRef:SetHighLightColor(rowFrame, tableRef:GetDefaultHighlightBlank())
       end
 
-      if row and column == 5 then
-        cellFrame.inviteActionHovered = false
-        updateInviteActionCellStyle(cellFrame, false)
+      if row and (column == INVITE_COLUMN or column == ARRANGE_COLUMN) then
+        updateActionCellStyle(cellFrame, false)
       end
 
       return true
     end,
     ["OnClick"] = function(_, _, data, _, row, realrow, column, _, button)
-      if row and realrow and column == 5 and button == "LeftButton" then
+      if row and realrow and column == INVITE_COLUMN and button == "LeftButton" then
         local rowData = data[realrow]
         if rowData then
-          addon:RunStrategyForEncounter(rowData.inviteString)
+          addon:RunStrategyForEncounter(rowData)
+        end
+
+        return true
+      end
+
+      if row and realrow and column == ARRANGE_COLUMN and button == "LeftButton" then
+        local rowData = data[realrow]
+        if rowData and hasPositionalSlots(rowData) then
+          WowauditGroupArranger:Start(rowData.slots)
         end
 
         return true
@@ -396,7 +465,7 @@ function addon:CreateFrame()
     frame = AceGUI:Create("Frame")
     frame:SetTitle("Wowaudit Invite Tool")
     frame:SetLayout("List")
-    frame:SetWidth(480)
+    frame:SetWidth(560)
     frame:SetHeight(440)
     frame:EnableResize(false)
     frame.frame:SetFrameStrata("MEDIUM")
@@ -435,7 +504,7 @@ function addon:CreateFrame()
     horizontalGroup:SetLayout("Flow")
 
     local editBoxGroup = AceGUI:Create("SimpleGroup")
-    editBoxGroup:SetWidth(460)
+    editBoxGroup:SetWidth(540)
     editBoxGroup:SetLayout("Fill")
 
     editbox = AceGUI:Create("MultiLineEditBox")
@@ -477,7 +546,7 @@ function addon:CreateFrame()
     for index, strategy in ipairs(inviteStrategies) do
       local button = AceGUI:Create("Button")
       button:SetText(strategy.label)
-      button:SetWidth(146)
+      button:SetWidth(174)
       button:SetCallback("OnClick", function() addon:SetStrategy(index) end)
       strategyGroup:AddChild(button)
       strategyButtons[index] = button
@@ -491,7 +560,6 @@ function addon:CreateFrame()
 
     rawInputText = ""
     encounters = {}
-    notInSetup = ""
     selectedStrategyIndex = 1
     addon:UpdateStrategyButtonText()
     addon:CreateEncounterTable()
@@ -509,186 +577,81 @@ end
 
 function addon:Replace(selectedInviteString)
   C_PartyInfo.ConvertToRaid()
-  addon:Uninvite(false, selectedInviteString)
+  addon:Uninvite(selectedInviteString)
   addon:Invite(selectedInviteString)
 end
 
-function addon:InviteAndRearrange(selectedInviteString)
+function addon:InviteAndRearrange(selectedInviteString, slots)
   C_PartyInfo.ConvertToRaid()
-  addon:Uninvite(true, selectedInviteString)
-  addon:InviteOnly(selectedInviteString)
+  addon:Invite(selectedInviteString)
+  addon:PrintNotInSetup(selectedInviteString)
+  WowauditGroupArranger:Start(slots, { watch = true })
 end
 
 function addon:InviteOnly(selectedInviteString)
   C_PartyInfo.ConvertToRaid()
-  notInSetup = ""
   addon:Invite(selectedInviteString)
+  addon:PrintNotInSetup(selectedInviteString)
+end
 
-  if (string.len(notInSetup) > 0) then
-    print("These players are not in the setup but haven't been removed: "..notInSetup:sub(1, -3))
+function addon:GetInviteLookup(selectedInviteString, fallbackRealm)
+  local inviteLookup = {}
+  for inviteTarget in string.gmatch(selectedInviteString or "", "([^\n]+)") do
+    local name = trim(inviteTarget)
+    if name ~= "" and not string.find(name, "-", 1, true) and fallbackRealm then
+      name = name .. "-" .. fallbackRealm
+    end
+    if name ~= "" then
+      inviteLookup[name] = true
+    end
+  end
+  return inviteLookup
+end
+
+function addon:PrintNotInSetup(selectedInviteString)
+  local rosterLookup, fallbackRealm, playerFullName = addon:GetRosterSnapshot()
+  local inviteLookup = addon:GetInviteLookup(selectedInviteString, fallbackRealm)
+
+  local notListed = {}
+  for rosterName, _ in pairs(rosterLookup) do
+    if rosterName ~= playerFullName and not inviteLookup[rosterName] then
+      table.insert(notListed, rosterName)
+    end
+  end
+  if #notListed > 0 then
+    print("These players are not in the setup but haven't been removed: " .. table.concat(notListed, ", "))
   end
 end
 
-function addon:Uninvite(moveOnly, selectedInviteString)
-  local moveToEnd = {}
-  local playersInGroup = {}
-  local currentInviteString = selectedInviteString or ""
-  if not (string.len(currentInviteString) > 0) then
+function addon:Uninvite(selectedInviteString)
+  if (selectedInviteString or "") == "" then
     return
   end
 
-  -- Uninvite raid members not in the string
-  local rosterSize = GetNumGroupMembers() or 0
-	local myName, myRealm = UnitFullName("player")
-	for j=rosterSize,1,-1 do
-		local nown = GetNumGroupMembers() or 0
-		if nown > 0 then
-      local name, rank, subgroup = GetRaidRosterInfo(j)
-      if name and not string.find(name, "-") then
-        name = name.."-"..myRealm
-      end
-
-      local playerInfo = {}
-
-      -- Store raid group status
-      if name then
-        playerInfo['name'] = name
-        playerInfo['subgroup'] = subgroup
-        playerInfo['index'] = j
-        playersInGroup[subgroup] = (playersInGroup[subgroup] or {})
-        table.insert(playersInGroup[subgroup], playerInfo)
-      end
-
-			if name then
-        local shouldRemain = false
-        for inviteTarget in string.gmatch(currentInviteString, "([^\n]+)") do
-          if inviteTarget == name then
-            shouldRemain = true
-          end
-        end
-
-        if moveOnly and not shouldRemain then
-          table.insert(moveToEnd, playerInfo)
-        end
-
-        if not shouldRemain then
-          if moveOnly then
-            notInSetup = notInSetup..name..", "
-          elseif name ~= myName then
-            local nameWithoutRealm, playerRealm = unpack(split(name, "-"))
-
-            if playerRealm == myRealm then
-              UninviteUnit(nameWithoutRealm)
-            else
-              UninviteUnit(name)
-            end
-          end
-        end
-			end
-		end
-	end
-
-  if moveOnly then
-    -- First move unbenched players to the start
-    for group=8,1,-1 do
-      if playersInGroup[group] then
-        for k, player in pairs(playersInGroup[group]) do
-          local currentTargetGroup = 1
-          local searching = true
-
-          while searching do
-            if currentTargetGroup >= player.subgroup then
-              searching = false
-            elseif playersInGroup[currentTargetGroup] and (addon:Tablelength(playersInGroup[currentTargetGroup]) > 4) then
-              currentTargetGroup = currentTargetGroup + 1
-            else
-              local onBench = false
-              for _,p in pairs(moveToEnd) do
-                if p.name == player.name then
-                  onBench = true
-                  searching = false
-                  break
-                end
-              end
-
-              if not onBench then
-                SetRaidSubgroup(player.index, currentTargetGroup)
-                player.subgroup = currentTargetGroup
-                playersInGroup[group][k] = nil
-                playersInGroup[currentTargetGroup] = (playersInGroup[currentTargetGroup] or {})
-                table.insert(playersInGroup[currentTargetGroup], player)
-                searching = false
-              end
-            end
-          end
-        end
-      end
-    end
-
-    -- Then move benched players to the end
-    for k, player in pairs(moveToEnd) do
-      local searching = true
-      local currentTargetGroup = 8
-
-      while searching do
-        if playersInGroup[currentTargetGroup] and (addon:Tablelength(playersInGroup[currentTargetGroup]) > 4) then
-          currentTargetGroup = currentTargetGroup - 1
-        else
-          SetRaidSubgroup(player.index, currentTargetGroup)
-          playersInGroup[currentTargetGroup] = (playersInGroup[currentTargetGroup] or {})
-          table.insert(playersInGroup[currentTargetGroup], player)
-          searching = false
-        end
+  local rosterLookup, myRealm, playerFullName = addon:GetRosterSnapshot()
+  local inviteLookup = addon:GetInviteLookup(selectedInviteString, myRealm)
+  for name, _ in pairs(rosterLookup) do
+    if name ~= playerFullName and not inviteLookup[name] then
+      local nameWithoutRealm, playerRealm = strsplit("-", name, 2)
+      if playerRealm == myRealm then
+        UninviteUnit(nameWithoutRealm)
+      else
+        UninviteUnit(name)
       end
     end
   end
-end
-
-function addon:Tablelength(T)
-  local count = 0
-  for _ in pairs(T) do count = count + 1 end
-  return count
 end
 
 function addon:Invite(selectedInviteString)
-  local groupSize = GetNumGroupMembers()
-  local alreadyInGroup = {}
-  local currentInviteString = selectedInviteString or ""
-  if groupSize ~= 0 then
-    for i=1,groupSize do
-      local name = GetRaidRosterInfo(i)
-      table.insert(alreadyInGroup, name)
+  local rosterLookup, selfRealm, playerFullName = addon:GetRosterSnapshot()
+  for inviteTarget in string.gmatch(selectedInviteString or "", "([^\n]+)") do
+    local name = trim(inviteTarget)
+    local normalizedName = name
+    if not string.find(name, "-", 1, true) and selfRealm then
+      normalizedName = name .. "-" .. selfRealm
+    end
+    if name ~= "" and normalizedName ~= playerFullName and not rosterLookup[normalizedName] then
+      C_PartyInfo.InviteUnit(name)
     end
   end
-
-  local selfName, selfRealm = UnitFullName("player")
-  -- Invite raid members in the string
-  for inviteTarget in string.gmatch(currentInviteString, "([^\n]+)") do
-    if not tableContains(alreadyInGroup, inviteTarget) then
-      if inviteTarget ~= selfName .. "-" .. selfRealm then
-        C_PartyInfo.InviteUnit(inviteTarget)
-      end
-    end
-  end
-end
-
-function split(input, separator)
-  if separator == nil then
-    separator = "%s"
-  end
-  local t={}
-  for str in string.gmatch(input, "([^"..separator.."]+)") do
-    table.insert(t, str)
-  end
-  return t
-end
-
-
-function tableContains(testTable, value)
-  for i = 1,#testTable do
-    if (testTable[i] == value) then
-      return true
-    end
-  end
-  return false
 end
